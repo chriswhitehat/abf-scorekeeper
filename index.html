@@ -69,7 +69,9 @@
     <div class="row spaced" style="margin-top:8px;">
       <button type="button" onclick="ABFPrintPdf()">Save to PDF</button>
       <button type="button" class="secondary small-toggle" onclick="ABFToggleCompact()">Compact Players</button>
+      <button type="button" class="secondary small-toggle" onclick="ABFClearSavedGame()">Clear Saved Game</button>
     </div>
+    <div class="muted" id="saveStatus" style="margin-top:6px;">Auto-save ready</div>
   </div>
 </div>
 
@@ -93,6 +95,7 @@
 <script>
 var ABF_CURRENT_INDEX = 0;
 var ABF_COMPACT = false;
+var ABF_LOADING_SAVED = false;
 function ABFById(id) { return document.getElementById(id); }
 function ABFNum(v) { var x = parseFloat(v); return isNaN(x) ? 0 : x; }
 function ABFInt(v) { var x = parseInt(v, 10); return isNaN(x) ? 0 : x; }
@@ -101,6 +104,59 @@ function ABFSetText(id, value) { var el = ABFById(id); if (el) el.textContent = 
 function ABFSelectedOption(sel) { return sel && sel.options && sel.selectedIndex >= 0 ? sel.options[sel.selectedIndex] : null; }
 function ABFActiveSection() { return ABFById('section_' + ABF_CURRENT_INDEX) || document.querySelector('.game-section'); }
 function ABFPrefix() { var s = ABFActiveSection(); return s ? s.getAttribute('data-prefix') : 'g0'; }
+function ABFStorageAvailable() {
+  try { var k = '__abf_test__'; window.localStorage.setItem(k, '1'); window.localStorage.removeItem(k); return true; } catch (e) { return false; }
+}
+function ABFSaveKey() {
+  var sec = ABFActiveSection();
+  if (!sec) return '';
+  var pfx = ABFPrefix();
+  return 'abfScorekeeper:v1:' + pfx + ':' + (sec.getAttribute('data-home-name') || '') + ':' + (sec.getAttribute('data-visitor-name') || '');
+}
+function ABFCollectState() {
+  var state = { players: {}, scores: {}, savedAt: new Date().toISOString() };
+  var els = document.querySelectorAll('#section_' + ABF_CURRENT_INDEX + ' select.player-select, #section_' + ABF_CURRENT_INDEX + ' input.score-input');
+  for (var i = 0; i < els.length; i++) {
+    var el = els[i];
+    if (!el || !el.id) continue;
+    if (el.tagName && el.tagName.toLowerCase() === 'select') state.players[el.id] = el.value;
+    else state.scores[el.id] = el.value;
+  }
+  return state;
+}
+function ABFSaveState() {
+  if (ABF_LOADING_SAVED || !ABFStorageAvailable()) return;
+  var key = ABFSaveKey();
+  if (!key) return;
+  try { window.localStorage.setItem(key, JSON.stringify(ABFCollectState())); ABFSetText('saveStatus', 'Saved'); } catch (e) { ABFSetText('saveStatus', 'Save unavailable'); }
+}
+function ABFLoadState() {
+  if (!ABFStorageAvailable()) return;
+  var key = ABFSaveKey();
+  if (!key) return;
+  var raw = null;
+  try { raw = window.localStorage.getItem(key); } catch (e) { raw = null; }
+  if (!raw) { ABFSetText('saveStatus', 'No saved score'); return; }
+  try {
+    var state = JSON.parse(raw);
+    ABF_LOADING_SAVED = true;
+    var id, el;
+    if (state.players) {
+      for (id in state.players) { if (Object.prototype.hasOwnProperty.call(state.players, id)) { el = ABFById(id); if (el) el.value = state.players[id]; } }
+    }
+    if (state.scores) {
+      for (id in state.scores) { if (Object.prototype.hasOwnProperty.call(state.scores, id)) { el = ABFById(id); if (el) el.value = state.scores[id]; } }
+    }
+    ABF_LOADING_SAVED = false;
+    ABFSetText('saveStatus', 'Restored saved score');
+  } catch (e2) { ABF_LOADING_SAVED = false; ABFSetText('saveStatus', 'Saved score unreadable'); }
+}
+function ABFClearSavedGame() {
+  if (!ABFStorageAvailable()) return;
+  var key = ABFSaveKey();
+  if (!key) return;
+  try { window.localStorage.removeItem(key); ABFSetText('saveStatus', 'Saved score cleared'); } catch (e) {}
+}
 function ABFSelectGame(idx) {
   ABF_CURRENT_INDEX = ABFInt(idx);
   var sections = document.getElementsByClassName('game-section');
@@ -115,6 +171,7 @@ function ABFSelectGame(idx) {
   }
   var sel = ABFById('gameSelect');
   if (sel && String(sel.value) !== String(ABF_CURRENT_INDEX)) sel.value = String(ABF_CURRENT_INDEX);
+  ABFLoadState();
   ABFRecalc();
 }
 function ABFHcpFor(pfx, side, slot) {
@@ -201,6 +258,7 @@ function ABFRecalc() {
   var leader = homeFinal > visitorFinal ? 'Home leads by ' + ABFFmt(homeFinal - visitorFinal) : visitorFinal > homeFinal ? 'Visitor leads by ' + ABFFmt(visitorFinal - homeFinal) : 'Match points are tied';
   var body = '<p><b>Current/next open round:</b> R' + openRound + '</p>' + '<p>Home needs <b>' + ABFFmt(hNeedRound) + '</b> more raw point(s) in R' + openRound + ' to win that round. Visitor needs <b>' + ABFFmt(vNeedRound) + '</b>.</p>' + '<p>For BBCP, Home needs <b>' + ABFFmt(hNeedBbcp) + '</b> more match grand-total point(s) to take the overall point. Visitor needs <b>' + ABFFmt(vNeedBbcp) + '</b>.</p>' + '<p><b>Status:</b> ' + leader + '.</p>';
   var points = ABFById(pfx + '_pointsNeededBody'); if (points) points.innerHTML = body;
+  ABFSaveState();
 }
 function ABFToggleCompact() { ABF_COMPACT = !ABF_COMPACT; var root = ABFById('plannerRoot'); if (root) root.className = ABF_COMPACT ? 'hide-mobile-detail' : ''; }
 function ABFPrintPdf() { window.print(); }
